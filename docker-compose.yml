@@ -1,0 +1,14 @@
+version:  '3.8'
+services:
+    foundational_nature_ai-notebooks:
+      build:
+        context: .
+      volumes:
+        - ./data:/home/mambauser/data
+        - ./notebooks:/home/mambauser/notebooks
+        - ./src:/home/mambauser/src
+      ports:
+        - 8888:8888
+        - 8787:8787  # dask dashboard
+      container_name: foundational_nature_ai_notebooks
+      env_file: .env
