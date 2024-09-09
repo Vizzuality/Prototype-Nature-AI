@@ -18,6 +18,8 @@ from langchain_community.llms import Ollama
 from langchain_ollama import OllamaEmbeddings
 from langchain_experimental.llms.ollama_functions import OllamaFunctions
 from langchain_community.chat_models.ollama import ChatOllama
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
@@ -29,7 +31,7 @@ from utils import LLMResponse
 
 class rag_model:
 
-    def __init__(self,dossier_path, system_prompt, llm_choice, model,persist_directory):
+    def __init__(self,dossier_path, system_prompt, llm_choice, model,temperature,persist_directory, rate_limiter):
         # Need to add code to be able to input multiple documents
         
         #loader = PyPDFLoader(file_path=dossier_path)
@@ -42,21 +44,31 @@ class rag_model:
         
         print(len(splits))
 
+        self.llm = None
         match llm_choice:
             case "ChatGPT":
-                self.llm = ChatOpenAI(model="gpt-4o", max_tokens=1024)
+                self.llm = ChatOpenAI(model=model,temperature = temperature, rate_limiter=rate_limiter)
                 self.embeddings = OpenAIEmbeddings()
             case "Ollama":
-                self.llm = ChatOllama(model=model)
+                self.llm = ChatOllama(model=model,temperature = temperature, rate_limiter=rate_limiter)
                 self.embeddings = OllamaEmbeddings(model=model)
+            case "GoogleGenerativeAI":
+                convert_system_to_human = False
+                if model == 'gemini-1.0-pro':
+                    convert_system_to_human = True
 
-        self.structured_llm = self.llm.with_structured_output(None, method = 'json_mode')        
+                self.llm = ChatGoogleGenerativeAI(
+                            model=model,
+                            temperature=temperature, convert_system_message_to_human = convert_system_to_human, rate_limiter=rate_limiter)
+                self.embeddings = GoogleGenerativeAIEmbeddings(model='models/embedding-001')
+
+        #self.structured_llm = self.llm.with_structured_output(None, method = 'json_mode')        
 
 
         vectorstore = None
-        if os.path.exists(persist_directory+'_'+llm_choice):
+        if os.path.exists(persist_directory+'_'+llm_choice+'_' + model):
             #If local store exists then read
-            vectorstore=FAISS.load_local(persist_directory+'_'+llm_choice, embeddings=self.embeddings, allow_dangerous_deserialization = True)
+            vectorstore=FAISS.load_local(persist_directory+'_'+llm_choice+'_' + model, embeddings=self.embeddings, allow_dangerous_deserialization = True)
         else:
             print("FAISS from documents")
             batch_size = 100
@@ -72,7 +84,7 @@ class rag_model:
             #vectorstore = Chroma.from_documents(documents=splits, embedding=self.embeddings,persist_directory=chroma_persist_directory)
             
             #vectorstore = FAISS.from_documents(documents=splits, embedding=self.embeddings)
-            vectorstore.save_local(persist_directory+'_'+llm_choice)
+            vectorstore.save_local(persist_directory+'_'+llm_choice+'_' + model)
             print("Finished constructing FAISS from documents")
 
         self.retriever = vectorstore.as_retriever()
@@ -94,5 +106,4 @@ class rag_model:
                 "input": prompt_input
             }
         )
-
         return results

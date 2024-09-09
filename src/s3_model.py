@@ -21,6 +21,7 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.llms import Ollama
 from langchain_experimental.llms.ollama_functions import OllamaFunctions
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_ollama import ChatOllama
 
@@ -36,7 +37,7 @@ from utils import LLMResponse
 
 class agent_model:
 
-    def __init__(self, system_prompt,llm_choice, model):
+    def __init__(self, system_prompt,llm_choice, model,temperature, rate_limiter):
 
         self.llm_choice = llm_choice
 
@@ -66,7 +67,7 @@ class agent_model:
 
         match llm_choice:
             case "ChatGPT":
-                self.llm = ChatOpenAI(model="gpt-4-turbo", max_tokens=1024)
+                self.llm = ChatOpenAI(model=model, temperature = temperature, rate_limiter=rate_limiter)
                                 
             case "Ollama":
                 #self.llm = Ollama(model=model)
@@ -75,10 +76,17 @@ class agent_model:
                 #     model=model,
                 #     base_url="http://localhost:11434/v1",
                 # )
-                self.llm = ChatOllama(model=model)
-                
+                self.llm = ChatOllama(model=model, temperature = temperature, rate_limiter=rate_limiter)
+            case "GoogleGenerativeAI":
+                convert_system_to_human = False
+                if model == 'gemini-1.0-pro':
+                    convert_system_to_human = True
 
-        self.structured_llm = self.llm.with_structured_output(LLMResponse)
+                self.llm = ChatGoogleGenerativeAI(
+                            model=model,
+                            temperature=temperature, convert_system_message_to_human = convert_system_to_human, rate_limiter=rate_limiter)                
+
+        #self.structured_llm = self.llm.with_structured_output(LLMResponse)
 
         # Construct the Tools agent
         self.agent = create_tool_calling_agent(self.llm, self.tools, self.prompt)

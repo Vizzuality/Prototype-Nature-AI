@@ -7,8 +7,10 @@ load_dotenv()
 os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 os.environ["TAVILY_API_KEY"] = os.getenv("TAVILY_API_KEY")
 os.environ["INATURALIST_API_KEY"] = os.getenv("INATURALIST_API_KEY")
+os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_GEN_AI_API_KEY")
 
 
+import setup
 from S1_model import ZeroShot
 from S2_model import rag_model
 from s3_model import agent_model
@@ -17,168 +19,102 @@ import pandas as pd
 import numpy as np
 import json
 import pickle
-
-def read_query_file_and_construct_questions(file_path):
-    """
-    Reads a custom-formatted file where the first line contains a question with placeholders,
-    and the subsequent lines contain data in CSV format. This function replaces the placeholders
-    in the question with data from each row.
-
-    Parameters:
-    file_path (str): The path to the file to be read.
-    
-    Returns:
-    list: A list of questions with data inserted from each row.
-    """
-    with open(file_path, 'r') as file:
-        # Extract the first line and get the question template
-        first_line = file.readline().strip()
-        if first_line.startswith('#System_prompt: '):
-            system_prompt = first_line[len('"#System_prompt:'):].strip()
-        else:
-            raise ValueError("The file does not start with a proper system prompt header.")
-        
-        second_line = file.readline().strip()
-        if second_line.startswith('#Prompt: '):
-            question_template = second_line[len('#Prompt: '):].strip()
-        else:
-            raise ValueError("The file does not start with a proper question header.")
-
-        # Read the CSV data that follows
-        data = pd.read_csv(file, skiprows=0)  # We already read the first and second lines, so the cursor is at the second line
-
-    # print(repr(question_template))
-    # q_data_columns = re.findall(r'\{([^}]+)\}',question_template)
-    # print(q_data_columns)
+import utils
 
 
-    # List to hold all questions filled with data
-    filled_questions = []
+def gather_responses(system_prompt, queries, params):
 
-    # Fill the question template with data from each row
-    for index, row in data.iterrows():
-        filled_question = question_template.format(**row.to_dict())
-        filled_questions.append(filled_question)
-    
-    return system_prompt,filled_questions, data
+    model_systems = {}
+    model_systems['s1'] = ZeroShot(system_template=system_prompt,llm_choice = params['llm_choice'], model = params['model'],temperature=params['temperature'])
+    model_systems['s2'] =  rag_model(dossier_path='data/retrieval_dossier/wikipedia-en-dwca-species-descriptions.csv', system_prompt= system_prompt,
+                llm_choice = params['llm_choice'], model = params['model'], temperature=params['temperature'], persist_directory=params['persist_directory'])
+    model_systems['s3'] = agent_model(system_prompt = system_prompt,llm_choice = params['llm_choice'], model = params['model'], temperature=params['temperature'])
 
-def filter_response(response):
-    if {'answer'} <= response.keys():
-        filtered_response = response['answer']
-    elif {'output'} <= response.keys():
-        filtered_response = response['output']
+    # s1_responses = []
+    # s2_responses = []
+    responses = {}
 
-    return filtered_response
+    models = ['s1','s2','s3']
 
-def read_and_process_species_responses(responses):
-    """
-    Reads a text file and splits each line into a numeric value and a text description.
-    Assumes each line starts with a numeric value followed by a comma, then the text.
 
-    Parameters:
-    responses (dict): dictionary of .
-    
-    Returns:
-    DataFrame: A pandas DataFrame with two columns: 'Numeric' and 'Text'.
-    """
-    data = []  # List to store the split data
+    if not os.path.isfile(params['pkl_out']):
+        print("Running model responses")
+        #read first test question.
+        for i, question in enumerate(queries):
+            responses[str(i)] = {}
+            print(question)
+            for model in models:
+                #if not os.path.isfile(f'output/Q{i}_{model}.json'):    
+                    responses[str(i)][model] = [model_systems[model].invoke_response(question) for i in range(params['Nreplicates'])]
 
-    # Open the file and process each line
-    #with open(file_path, 'r', encoding='utf-8') as file:
-    for r in responses:
-        # Strip whitespace and split the line at the first comma
-        parts = r.strip().split(',', 1)
-        #Check that there are 2 parts and that it doesn't start with "Note:"
-        if len(parts) == 2 and not parts[0].startswith("Note:"):
-            numeric_value = float(parts[0].strip())  # Convert the numeric part to float
-            text_description = parts[1].strip()
-            data.append([numeric_value, text_description])
+                #with open(f'output/Q{i}_{model}.json', 'w') as f:
+                    # for r in responses[model]:
+                    #     f.write(f"{r}\n")
+                #    json.dump(responses[model],f)
 
-    # Convert the list of data into a DataFrame
-    df = pd.DataFrame(data, columns=['Value', 'Justification'])
-    return df
-### Begin by reading in the evaluation questions. These are split into groups,
+        out_file = open(params['pkl_out'], 'wb')
+        pickle.dump(responses, out_file)
+        out_file.close()
+
+    return responses
+
+### Evaluation questions. These are split into groups,
 # 1. species specific questions
 # 2. threats and interventions
 
 
-params = {}
+#Species presence absences
+file_path = 'eval/species_point_presence_absence.csv'
+sp_pa_df = pd.read_csv(file_path)
 
-params['Nreplicates'] = 10
-params['llm_choice'] = "ChatGPT"
-params['model'] = None #llama3.1" #model choice if using a local Ollama model
-params['pkl_out'] = f"output/{params['llm_choice']}_All_Model_Q_responses.pkl"
+#System prompt for presence/absences
+system_prompt = "You are a Foundational Nature AI capable of informing questions about biodiversity and conservation relevant for real-world decisions. Ensure that you respond with a score between 0 and 1 (where 1 indicates that you think the species is very likely to be present there and 0 indicates the species is highly unlikely to be found there) Please provide your response with the following fields, separated by commas: the score, the justification,  then a measure of your confidence - again scored from 0 to 1 (0 is very low confidence, 1 is very confident in your answer)"
+# List to hold all questions filled with data
+question_template = "Can you tell me if {binomial} can be found at the point {y} degress latitude and {x} degrees longitude"
+filled_questions = []
 
-#For each category of question:
-# - Read the system prompt
-# - Set up a set of models with the system prompt
-# - Construct the set of questions for the model
-# - Invoke questions
-# - Record responses
-# - Repeat invocation and recording N times
-# - Calculate performances
+# Fill the question template with data from each row
+for index, row in sp_pa_df.iterrows():
+    filled_question = question_template.format(**row.to_dict())
+    filled_questions.append(filled_question)
+
+####  Create model approaches ####
+#Get the parameters
+params = setup.get_parameters()
+params['pkl_out'] = f"output/species_point_pres_abs_{params['llm_choice']}_{params['model']}_All_Model_Q_responses.pkl"
+#TBD: Create log files and pass into the models as they are initialised
+
+
+
+sp_p_a_responses = gather_responses(system_prompt=system_prompt,queries=filled_questions,params=params)
+
+
+
+
+
+
+
 
 
 #Species locations
 file_path = 'eval/species_geospatial_queries_responses - species_presences.csv'  # Replace this with the path to your file
 try:
-    system_prompt, queries, data = read_query_file_and_construct_questions(file_path)
+    system_prompt, queries, data = utils.read_query_file_and_construct_questions(file_path)
     print(system_prompt)
 
 except Exception as e:
     print("Error reading queries:", e)
 
+####  Create model approaches ####
+#Get the parameters
+params = setup.get_parameters()
+params['pkl_out'] = f"output/species_toponym_presence_likelihood_{params['llm_choice']}_{params['model']}_All_Model_Q_responses.pkl"
 #TBD: Create log files and pass into the models as they are initialised
 
-#Create model approaches
-model_systems = {}
-model_systems['s1'] = ZeroShot(system_template=system_prompt, llm_choice=params['llm_choice'], model = params['model'])
-model_systems['s2'] = rag_model(dossier_path='data/retrieval_dossier/wikipedia-en-dwca-species-descriptions.csv', system_prompt= system_prompt,
-               llm_choice = params['llm_choice'], model = params['model'], persist_directory='training/wikipedia')
-model_systems['s3'] = agent_model(system_prompt = system_prompt,llm_choice = params['llm_choice'], model = params['model'])
+
+sp_p_a_responses = gather_responses()
 
 
-# s1_responses = []
-# s2_responses = []
-responses = {}
-
-models = ['s1','s2','s3']
-
-
-if not os.path.isfile(params['pkl_out']):
-    print("Running model responses")
-    #read first test question.
-    for i, question in enumerate(queries):
-        responses[str(i)] = {}
-        print(question)
-        for model in models:
-            #if not os.path.isfile(f'output/Q{i}_{model}.json'):    
-                responses[str(i)][model] = [model_systems[model].invoke_response(question) for i in range(params['Nreplicates'])]
-
-            #with open(f'output/Q{i}_{model}.json', 'w') as f:
-                # for r in responses[model]:
-                #     f.write(f"{r}\n")
-            #    json.dump(responses[model],f)
-
-    out_file = open(params['pkl_out'], 'wb')
-    pickle.dump(responses, out_file)
-    out_file.close()
-
-
-
-# #Calculate performance measures for each response
-
-def quantitative_species_presence_metric(responses,i):
-    df = read_and_process_species_responses(responses)
-    diffs = df['Value'] - data['Value'][i]
-    mean_diff = np.mean(diffs)
-    return df['Value'], diffs, mean_diff
-
-
-def qualitative_evaluation(fname, i):
-    # implement code for comparing the justification responses to the supplied responses
-    
-    return None
 
 # Construct container to hold 
 diffs = {}
@@ -197,7 +133,7 @@ for i, question in enumerate(queries):
     diffs[str(i)] = {}
     mean_diff[str(i)] = {}
     for model in models:
-        filtered_responses = [filter_response(r) for r in responses[str(i)][model]]
+        filtered_responses = [utils.filter_response(r) for r in responses[str(i)][model]]
  
         vals[str(i)],diffs[str(i)][model], mean_diff[str(i)][model] = quantitative_species_presence_metric(filtered_responses,i)
         

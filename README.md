@@ -37,32 +37,30 @@ mamba env create -n foundational_nature_ai -f environment.yml
 
 This will create an environment called foundational-nature-ai with a common set of dependencies.
 
-### `git` (if needed) and pre-commit hooks
+### API Keys
+You will need to generate appropriate API keys for the LLMs that you want to use.
+Create a .env file and save this in the root directory, e.g.
+OPENAI_API_KEY={YOUR-KEY}
 
-If this project is a new and standalone (not a module in a bigger project), you need to initialize git:
 
-``` bash
-git init
+### Data
+
+Download the data, eval and training folders from here:
+https://drive.google.com/drive/folders/1idjUhOEqePqDYp-l-jUFq2jl7v-8yCm5?usp=sharing
+
+and place in the root of the project
+
+
+### Model and evalaution setup
+Parameters for defining which model to run the evaluation/app with are defined in the params dictionary constructed in setup.py
+
+
+### Streamlit app
+
+To run the steamlit app execute:
+```bash
+streamlit run src/app.py
 ```
 
-If the project is already in a git repository, you can skip this step.
+This will run a prototype app and launch it in a web browser
 
-To install the **pre-commit hooks**, with the environment activated and in the project root directory, run:
-
-``` bash
-pre-commit install
-```
-
-## Update the environment
-
-If you need to update the environment installing a new package, you simply do it with:
-
-``` bash
-mamba install [package]  # or `pip install [package]` if you want to install it via pip
-```
-
-then update the environment.yml file so others can clone your environment with:
-
-``` bash
-mamba env export --no-builds -f environment.yml
-```
